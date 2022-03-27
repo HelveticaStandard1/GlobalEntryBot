@@ -40,7 +40,7 @@ def get_first_opening(location_name, location_code):
         sys.exit(1)
 
     for result in results:
-        if result['active'] == 0:
+        if result['active'] > 0:
             logging.info('Opening found for {}'.format(location_name))
             return result
 
