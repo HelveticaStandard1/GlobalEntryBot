@@ -2,30 +2,14 @@ import argparse
 import logging
 import sys
 from datetime import datetime, timedelta
-import boto3
+
 import requests
-from botocore.exceptions import ClientError
 
 from configuration import *
+from dynamodb import put_item, get_item
 from locations import get_location_name
+from sns import send_notification
 from validate import validate_args
-
-session = boto3.session.Session(profile_name='GlobalEntryBot')
-sns = session.client('sns')
-
-
-def send_notification(message, topic_arn):
-    logging.info("Posting message '{}' to topic ARN {}".format(message, topic_arn))
-    try:
-        response = sns.publish(
-            TopicArn=topic_arn,
-            Message=message,
-            Subject=GLOBAL_ENTRY_NOTIFICATION_SUBJECT
-        )
-        logging.info("Published Message ID: {}".format(response['MessageId']))
-    except ClientError as ex:
-        logging.exception("Client Error occurred when attempting to send to SNS.", '', ex)
-        raise ex
 
 
 def get_end_date(start, kwargs):
@@ -80,6 +64,14 @@ def build_message(location_name, result):
     return message
 
 
+def store_message(location_code, timestamp):
+    put_item(location_code, timestamp)
+
+
+def already_notified(location_code, timestamp):
+    return get_item(location_code, timestamp)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--verbose', '-v', action='store_true', default=False)
@@ -95,8 +87,12 @@ def main():
     location_name = get_location_name(args.location_code)
     result = get_first_opening(location_name, **vars(args))
     if result:
-        message = build_message(location_name, result)
-        send_notification(message, args.topic_arn)
+        if not already_notified(args.location_code, result['timestamp']):
+            message = build_message(location_name, result)
+            store_message(args.location_code, result['timestamp'])
+            send_notification(message, args.topic_arn, GLOBAL_ENTRY_NOTIFICATION_SUBJECT)
+        else:
+            logging.info("Notification has already been sent today.  Not notifying.")
     logging.info("Main Completed")
 
 
